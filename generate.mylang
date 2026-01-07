@@ -1,0 +1,103 @@
+std :: #import "std";
+libc :: #import "libc";
+generate_c_bindings :: std.bindgen.c.generate_c_bindings;
+
+main :: -> {
+    // libclang
+    generate_c_bindings(
+        "clang",
+        "/usr/local/include/clang-c/Index.h",
+        .[
+            "-I".ptr, "/home/qwox/lib/llvm/llvm-project/clang/include".ptr,
+            // When I try to use the header files in `/usr/local/include`, which are identical btw,
+            // libclang is unable to read the docstrings.
+            //"-I".ptr, "/usr/local/include".ptr,
+            "-I".ptr, "/usr/local/lib/clang/18/include".ptr, // stddef.h
+        ][..],
+        "./generated/libclang.mylang",
+        .{ convert_macros=false },
+    );
+
+    generate_libc_bindings();
+
+    // sys/socket.h
+    generate_c_bindings(
+        "sys_socket",
+        "/usr/include/sys/socket.h",
+        .[
+            "-I".ptr, "/usr/local/lib/clang/18/include".ptr, // stddef.h
+        ][..],
+        "./generated/sys_socket.h.mylang",
+        .{ in_libc=true, trim_function_prefix=false, convert_macros=false },
+    );
+
+    generate_opengl_bindings();
+}
+
+generate_libc_bindings :: () -> {
+    headers :: struct { header_name: []u8, convert_macros := false }.[
+        .("assert"),
+        .("complex"),
+        .("ctype"),
+        .("errno"),
+        .("fenv"),
+        .("inttypes"),
+        .("limits", true),
+        .("locale"),
+        .("math"),
+        .("setjmp"),
+        .("signal", true),
+        .("stdbit"),
+        .("stdint"),
+        .("stdio"),
+        .("stdlib"),
+        .("string"),
+        .("threads"),
+        .("time"),
+        .("uchar"),
+        .("wctype"),
+    ];
+
+    stddef_h_include := .["-I".ptr, "/usr/local/lib/clang/18/include".ptr];
+
+    for h in headers {
+        path := std.fmt.format("/usr/include/%s.h", xx h.header_name.ptr);
+        defer libc.free(path.ptr);
+
+        out_path := std.fmt.format("./generated/%s.h.mylang", xx h.header_name.ptr);
+        defer libc.free(out_path.ptr);
+
+        generate_c_bindings(h.header_name, path, stddef_h_include[..], out_path, .{
+            in_libc=true,
+            trim_function_prefix=false,
+            convert_macros=h.convert_macros
+        });
+    }
+}
+
+generate_opengl_bindings :: () -> {
+    generate_c_bindings(
+        "GL",
+        "/usr/include/GL/gl.h",
+        .[
+            "-DGL_GLEXT_PROTOTYPES".ptr,
+            //"-I".ptr, "/usr/local/lib/clang/18/include".ptr, // stddef.h
+            // "-I".ptr, "/usr/include/GL".ptr,
+        ][..],
+        "./generated/gl.h.mylang",
+        .{ convert_macros=true, function_prefix="gl", macro_prefix="GL" },
+    );
+
+    generate_c_bindings(
+        "glfw3",
+        "/usr/local/lib/glfw/include/GLFW/glfw3.h",
+        .[
+            "-DGLFW_INCLUDE_NONE".ptr, // skip `GL/gl.h` include
+            "-I".ptr, "/usr/local/lib/clang/18/include".ptr, // stddef.h
+        ][..],
+        "./generated/glfw3.h.mylang",
+        .{ convert_macros=true, function_prefix="glfw", macro_prefix="GLFW" },
+        // TODO: add `skip_includes: ["gl.h"]` <https://stackoverflow.com/questions/19046109/how-can-i-skip-includes-using-libclang>
+    );
+}
+
